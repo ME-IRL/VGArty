@@ -1,7 +1,7 @@
 # VGArty
 VGA on the Arty A7 via UART serial
 
-This project uses the [UART16550](https://github.com/olofk/uart16550) and [wb_intercon](https://github.com/olofk/wb_intercon) [fusesoc](https://github.com/olofk/fusesoc) cores, so follow the steps there to install fusesoc
+This project uses the [fusesoc](https://github.com/olofk/fusesoc) and vivado, so follow the steps there to install
 
 ### Build and flash FPGA Verilog source
 ```sh
@@ -26,6 +26,3 @@ tools/send.py tools/hello_world.bmp -d > mem/image.mem
 ### TODO
 There's a bug in the verilog code where the 0th pixel (least significant bit from pixel data) is displayed from the next byte.  
 The fix currently is done via the upload script where it would just send the 0th bit from the next byte instead of the current byte.  
-
-Planning on simplifying the code by using a simpler UART core and not using wishbone interface as this is fairly simple code.  
-Also, the TX line is not necessary.
