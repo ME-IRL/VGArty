@@ -7,10 +7,6 @@ module top (
 	input wire sys_rst,
 
 	input wire uart_rx,
-	output wire uart_tx,
-	output wire [7:0] debug,
-
-	input wire [3:0] btn,
 	output wire [3:0] led,
 
 	output wire vga_hsync,
@@ -19,17 +15,6 @@ module top (
 	output wire [2:0] vga_green,
 	output wire [2:0] vga_blue
 );
-
-	reg on;
-	initial on <= 0;
-
-	// Blinky as a test
-	blinky #(
-		.clk_freq_hz(100_000_000)
-	) b (
-		.clk(clk100),
-		.q(led[0])
-	);
 
 	// Clock generator (see Xilinx UG768 [pg 357])
 	wire clk100, clk65, clk2_unused, clk3_unused, clk4_unused, clk5_unused;
@@ -85,65 +70,94 @@ module top (
 		.CLKFBIN(clk_feedback_bufd) // 1-bit input, feedback clock
 	);
 
-	wire wb_clk = clk65;
-	reg wb_rst;
-	initial wb_rst <= 1;
-	always @(posedge wb_clk)
-		wb_rst <= !(clk_locked && sys_rst);
+	wire idle, ready;
+	wire [7:0] data;
 
-	`include "wb_intercon.vh"
-
-	assign wb_s2m_uart_err = 1'b0;
-	assign wb_s2m_uart_rty = 1'b0;
-	wire uart_int;
-	
-	uart_top uart (
-		.wb_clk_i(wb_clk),
-		.wb_rst_i(wb_rst),
-
-		.wb_adr_i(wb_m2s_uart_adr),
-		.wb_dat_i(wb_m2s_uart_dat),
-		.wb_dat_o(wb_s2m_uart_dat),
-		.wb_we_i (wb_m2s_uart_we),
-		.wb_stb_i(wb_m2s_uart_stb),
-		.wb_cyc_i(wb_m2s_uart_cyc),
-		.wb_ack_o(wb_s2m_uart_ack),
-		.wb_sel_i(wb_m2s_uart_sel),
-		.int_o   (uart_int),
-
-		// UART	signals
-		.stx_pad_o(uart_tx),
-		.srx_pad_i(uart_rx)
+	UART_RX #(
+		.CLOCK_FREQUENCY(65_000_000),
+		.BAUD_RATE(115200)
+	) uart (
+		.clockIN(clk65),
+		.nRxResetIN(1),
+		.rxIN(uart_rx),
+		.rxIdleOUT(idle),
+		.rxReadyOUT(ready),
+		.rxDataOUT(data)
 	);
 
-	wire [31:0] interrupts;
-	assign interrupts = {31'b0, uart_int};
+	reg [6:0] wx;
+    reg [9:0] wy;
+    reg [7:0] d;
+    wire [6:0] rx;
+    wire [9:0] ry;
+    wire [7:0] q;
+    reg we;
 
-	wire pixel;
+    ram frame (
+        .clk(clk65),
+        .wx(wx),
+        .wy(wy),
+        .d(d),
+        
+        .rx(rx),
+        .ry(ry),
+        .q(q),
+        .we(we)
+    );
 
-	cpu core(
-		.wb_clk_i(wb_clk),
-		.wb_rst_i(wb_rst),
+	reg writing = 0;
+	reg prev = 0;
+	assign led[0] = writing;
 
-		.wb_adr_o(wb_m2s_cpu_adr),
-		.wb_dat_o(wb_m2s_cpu_dat),
-		.wb_sel_o(wb_m2s_cpu_sel),
-		.wb_we_o (wb_m2s_cpu_we ),
-		.wb_cyc_o(wb_m2s_cpu_cyc),
-		.wb_stb_o(wb_m2s_cpu_stb),
-		.wb_dat_i(wb_s2m_cpu_dat),
-		.wb_ack_i(wb_s2m_cpu_ack),
-		.wb_err_i(wb_s2m_cpu_err),
-		
-		.clk65(clk65),
-		.hsync(vga_hsync),
-		.vsync(vga_vsync),
-		.pixel(pixel),
+	always @(posedge clk65) begin
+		prev <= ready;
+		if(ready && !prev) begin // New input data
+			if(writing) begin // If already in writing mode, write
+				d <= data;
+				we <= 1;
 
-		.leds(led[3:1]),
+				// And then update pixel write address
+				if(wx == 127) begin
+					wx <= 0;
+					if(wy == 767) begin
+						wy <= 0;
+						writing <= 0; // Leave writing mode when the entire frame is filled
+					end else begin
+						wy <= wy + 1;
+					end
+				end else begin
+					wx <= wx + 1;
+				end
+			end else begin // If not in writing mode,
+				if(data == 8'hAA) // Check if start byte
+					writing <= 1; // Enter writing mode
+			end
+		end else we <= 0; // No input data, read
+	end
 
-		.interrupts_i(interrupts)
-	);
+	// XY Counter
+	reg [10:0] px;
+	reg [9:0] py;
+	always @(posedge clk65) begin
+		if(px >= (1024+24+136+160-1)) begin
+			px <= 0;
+			if(py >= (768+3+6+29-1)) begin
+				py <= 0;
+			end else begin
+				py <= py + 1;
+			end
+		end else begin
+			px <= px + 1;
+		end
+	end
+
+	// VGA Output
+	assign vga_hsync = ~(px >= (1024 + 24) && px < (1024 + 24 + 136));
+	assign vga_vsync = ~(py >= (768 + 3) && py < (768 + 3 + 6));
+
+	assign rx = px[10:3];
+    assign ry = py;
+	wire pixel = (q[7-px[2:0]] && (px < 1024 && py < 768));
 
 	assign vga_red[0] = pixel;
 	assign vga_green[0] = pixel;

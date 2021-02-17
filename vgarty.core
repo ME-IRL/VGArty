@@ -4,21 +4,16 @@ description: VGA Test
 
 filesets:
   rtl:
-    depend: [wb_intercon, uart16550, fusesoc:utils:blinky]
     files:
       - rtl/top.v
-      - rtl/cpu.v
       - rtl/ram.v
+      - rtl/RXMajority3Filter.v
+      - rtl/UART_RX.v
     file_type: verilogSource
 
   mem:
     files:
       - mem/image.mem
-
-  tb:
-    files:
-      - tb/tb.v
-    file_type: verilogSource
 
   constr:
     files: [constr/Arty-A7-100-Master.xdc : {file_type: xdc}]
@@ -27,25 +22,7 @@ targets:
   default:
     default_tool: vivado
     filesets: [rtl, constr, mem]
-    generate: [wb_intercon]
     toplevel: top
     tools:
       vivado:
         part: xc7a100tcsg324-1
-  sim:
-    default_tool: icarus
-    filesets: [rtl, tb]
-    generate: [wb_intercon]
-    toplevel: tb
-
-generate:
-  wb_intercon:
-    generator: wb_intercon_gen
-    parameters:
-      masters:
-        cpu:
-          slaves: [uart]
-      slaves:
-        uart:
-          offset: 0
-          size: 0x10
